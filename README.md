@@ -1,158 +1,150 @@
-# Comparative Performance Analysis of 4-Stage and 6-Stage RISC-V Cores in a Multicore FPGA System
+# 4-Core RV32I Processor System for Edge Machine Learning and CNN Inference
 
-A controlled hardware benchmarking and multicore scaling evaluation of RV32I soft processors on the AMD PYNQ-Z2 (Zynq-7020) FPGA platform, featuring an int8-quantized Convolutional Neural Network (CNN) deployment for real-time edge classification.
-
----
-
-## Authors & Citation
-
-- **Molik Rajvanshi** (Roll No. 23UEC575)
-- **Ujjawal Khatri** (Roll No. 23UEC635)
-- **Advisor**: Dr. Abhishek Sharma, Assistant Professor
-- **Institution**: Department of Electronics and Communication Engineering, The LNM Institute of Information Technology (LNMIIT), Jaipur
-- **Session**: Academic Session 2024–2025
+An FPGA-based 4-core RV32I soft-processor platform deployed on the AMD PYNQ-Z2 (Zynq-7020) FPGA board. The system accelerates integer machine learning models and int8 quantized Convolutional Neural Network (CNN) workloads using bare-metal parallel execution and mailbox-based synchronization.
 
 ---
 
-## Abstract
+## Overview
 
-This repository presents the implementation, multicore scaling, and hardware benchmarking of two RV32I soft-core processor families on an AMD PYNQ-Z2 (Zynq-7020) FPGA:
-1. A 4-stage in-order pipelined RV32I processor scaled across 2, 4, and 8-core configurations.
-2. A 6-stage multicycle RV32I soft-processor core.
+This repository contains the hardware layout notes, bare-metal RISC-V worker firmware, ARM host drivers, and validation proofs for a 4-core RV32I soft-processor system. The platform executes machine learning workloads without operating system overhead or floating-point hardware requirements by leveraging post-training static int8 quantization.
 
-All configurations run bare-metal workloads without library dependency, utilizing a unified mailbox synchronization protocol and BRAM memory partitioning. Experimental benchmarking using MiBench integer workloads (Basicmath, Bitcount, Qsort, Stringsearch, FFT, IFFT, Matmul) demonstrates that the 4-stage pipelined architecture achieves superior performance and hardware efficiency across all core counts, reaching up to 5.98x speedup on 8 cores while consuming 28,591 LUTs and 1.63 W total power (versus 43,731 LUTs and 1.69 W for the 6-stage core).
+### Core Workloads Executed
 
-As a practical application, a lightweight int8 quantized Convolutional Neural Network (`FruitCNNSmall`, ~34.3K parameters) is deployed on the 4-core system for 5-class fruit image classification, achieving 100% test accuracy on FPGA hardware.
+1. **Int8 Fruit CNN Classification (`FruitCNNSmall`)**: 5-class fruit image classification (Apple Red 1, Banana 1, Mango 1, Orange 1, Pomegranate 1) operating on 32x32 RGB inputs.
+2. **MNIST Single-Layer Int8 Fully-Connected (FC)**: 784-input digit classification servicing batch inference.
+3. **MNIST 2-Layer Multi-Layer Perceptron (MLP)**: 784 -> 64 -> 10 network supporting dual int8 and int32 output accumulation modes.
 
 ---
 
-## System Architecture
+## Hardware Architecture
 
-The overall hardware framework integrates the Zynq Processing System (PS) as host controller communicating with independent RV32I worker cores over an AXI interconnect.
+The system utilizes an ARM Cortex-A9 Processing System (PS) host controller alongside 4 independent lightweight RV32I soft cores instantiated on the FPGA fabric.
 
-### Block Diagram
+### System Specifications
 
-![2-Core Block Architecture](docs/images/architecture_2core.jpg)
+- **Processor Cores**: 4x RV32I 4-stage in-order pipelined soft cores.
+- **Interconnect**: AXI4 / AXI4-Lite shared interconnect.
+- **Memory Subsystem**: Private BRAM window allocated per core (64 KiB BRAM per core).
+- **Synchronization**: Hardware mailbox registers (`MB[0]` done flag, `MB[5]` job flag, CSR cycle and instruction counters).
+- **Host Controller**: Zynq-7000 PS ARM Cortex-A9 managing initialization, data transfer, pooling operations, and UART output.
 
-### Memory Organization
+### Hardware Block Diagram
 
-Each RV32I worker operates within a private BRAM window. Data BRAM is partitioned equally across cores:
-- **2 Cores**: 128 KiB BRAM per core
-- **4 Cores**: 64 KiB BRAM per core
-- **8 Cores**: 32 KiB BRAM per core
+![4-Core Architecture Block Diagram](docs/images/architecture_2core.jpg)
 
-Address window base: `CORE_BASE(i) = 0x40000000 + i * WINDOW_SIZE`
+### BRAM Memory Partitioning
+
+Memory base address for core $i$: `CORE_BASE(i) = 0x40000000 + i * 0x10000`
+
+- `0x0000 - 0x1FFF`: Private stack space
+- `0x2000 - 0x20FF`: Mailbox control structures
+- `0x2100+`: Input buffers, weight matrices, bias vectors, and output activation arrays
 
 ![Memory Address Division](docs/images/memory_division.jpg)
 
 ---
 
-## Performance Comparison (MiBench Benchmarks)
+## Machine Learning & CNN Inference Pipeline
 
-All evaluations use post-implementation timing closure frequencies ($F_{max}$).
+### Workload Partitioning Scheme
 
-### Complete Performance Metrics Table
+For convolution layers, work is partitioned across the 4 worker cores by output channel:
 
-| Kernel | Core Family | Cores ($N$) | Frequency (MHz) | Parallel IPC | Total MIPS | Time (s) | Speedup | Efficiency |
-|---|---|---|---|---|---|---|---|---|
-| **Basicmath** | 4-Stage | 2 | 81.76 | 1.419 | 116.0 | 0.0216 | 1.000 | 1.000 |
-| **Basicmath** | 4-Stage | 4 | 82.19 | 2.835 | 233.0 | 0.0110 | 1.948 | 0.974 |
-| **Basicmath** | 4-Stage | 8 | 80.77 | 5.209 | 420.7 | 0.0066 | 3.336 | 0.834 |
-| **Basicmath** | 6-Stage | 2 | 80.40 | 0.609 | 49.0 | 0.0555 | 1.000 | 1.000 |
-| **Basicmath** | 6-Stage | 4 | 76.71 | 1.131 | 86.8 | 0.0371 | 1.569 | 0.785 |
-| **Basicmath** | 6-Stage | 8 | 72.69 | 1.750 | 127.2 | 0.0399 | 1.541 | 0.385 |
-| **FFT** | 4-Stage | 2 | 81.76 | 1.652 | 135.1 | 0.0174 | 1.000 | 1.000 |
-| **FFT** | 4-Stage | 4 | 82.19 | 3.211 | 263.9 | 0.0092 | 1.870 | 0.935 |
-| **FFT** | 4-Stage | 8 | 80.77 | 6.151 | 496.8 | 0.0102 | 1.724 | 0.431 |
-| **FFT** | 6-Stage | 2 | 80.40 | 0.756 | 60.8 | 0.0451 | 1.000 | 1.000 |
-| **FFT** | 6-Stage | 4 | 76.71 | 1.519 | 116.5 | 0.0340 | 1.395 | 0.698 |
-| **FFT** | 6-Stage | 8 | 72.69 | 2.953 | 214.7 | 0.0513 | 0.973 | 0.243 |
-| **Matmul** | 4-Stage | 8 | 80.77 | 6.046 | 488.3 | 0.0283 | 13.589 | 3.397 |
-
-### Hardware Resource & Power Consumption
-
-Post-implementation FPGA utilization on PYNQ-Z2 (Zynq-7020):
-
-| Family | Cores ($N$) | LUT | FF | BRAM | Power (W) |
-|---|---|---|---|---|---|
-| 4-Stage Pipeline | 2 | 5,921 | 7,556 | 65 | 1.446 |
-| 4-Stage Pipeline | 4 | 11,048 | 14,003 | 66 | 1.475 |
-| 4-Stage Pipeline | 8 | 28,591 | 33,341 | 68 | 1.630 |
-| 6-Stage Multicycle | 2 | 11,304 | 11,482 | 98 | 1.559 |
-| 6-Stage Multicycle | 4 | 22,155 | 22,111 | 132 | 1.605 |
-| 6-Stage Multicycle | 8 | 43,731 | 43,357 | 136 | 1.690 |
-
-### Benchmark Visualization
-
-![Total MIPS Comparison](docs/images/chart_mips.png)
-
-![Scaling Efficiency](docs/images/chart_efficiency.png)
+- **Conv1 (8 Output Channels)**: 2 channels processed per RV32I core.
+- **MaxPool1**: Executed on ARM host.
+- **Conv2 (16 Output Channels)**: 4 channels processed per RV32I core.
+- **MaxPool2**: Executed on ARM host.
+- **FC Layers**: Executed with soft-float dequantization on ARM host.
 
 ---
 
-## Edge AI Application: Int8 CNN Fruit Classification
+## Hardware Proof & Execution Results
 
-To validate real-world application performance, a lightweight int8 quantized Convolutional Neural Network (`FruitCNNSmall`, 34,357 parameters) was implemented for 5-class fruit classification (Apple Red 1, Banana 1, Mango 1, Orange 1, Pomegranate 1).
+All models were executed and verified on physical PYNQ-Z2 FPGA hardware via UART serial interface (115200 baud).
 
-### Model Topology & Heterogeneous Distribution
+### 1. Fruit CNN Inference Proofs
 
-| Layer | Type | Output Shape | Execution Unit | Computation |
-|---|---|---|---|---|
-| Conv1 | Conv2d (3->8, k3p1) | (8, 32, 32) | 4x RV32I Workers (2 ch/core) | Data-parallel int8 MAC |
-| MaxPool1 | MaxPool2d (2x2) | (8, 16, 16) | ARM Cortex-A9 Host | Hardware comparison |
-| Conv2 | Conv2d (8->16, k3p1) | (16, 16, 16) | 4x RV32I Workers (4 ch/core) | Data-parallel int8 MAC |
-| MaxPool2 | MaxPool2d (2x2) | (16, 8, 8) | ARM Cortex-A9 Host | Hardware comparison |
-| FC1 | Linear (1024->32) | (32,) | ARM Cortex-A9 Host | Int8 matrix vector |
-| FC2 | Linear (32->5) | (5,) | ARM Cortex-A9 Host | Float Logits |
+#### Banana 1 Test Image & Hardware Result
 
-### FPGA Hardware Execution Results
+![Banana Input](docs/images/banana_input.jpg)
 
-All five classes were classified correctly on FPGA hardware.
+```text
+=== Fruit CNN int8 (calibrated scales) ===
+RELU1_OUT_SCALE = 13972 uS
+RELU2_OUT_SCALE = 70234 uS
+RELU_FC1_SCALE  = 858830 uS
+conv1_hw : 10 13 10 9 9 9 9 9 9 9 8 12 34 56 69 71 70 61 49 37 
+pool1_hw : 13 10 9 9 9 12 56 71 70 49 33 25 15 36 70 81 12 10 8 8 
+conv2_hw : 3 4 3 3 2 5 11 20 22 18 12 7 6 6 12 13 7 8 7 6 
+pool2_hw : 8 7 12 42 45 25 16 25 8 6 11 41 52 51 38 16 7 6 10 39 
+fc1_hw   : 0 75 12 42 0 0 0 0 0 52 0 0 0 38 0 0 0 7 0 0 0 0 6 13 0 39 0 48 0 51 47 
+fc2_hw   : -19686 27249 14689 -58571 -3808 
+HW pred : 1 
+HW cls  : Banana 1
+```
 
-#### Banana 1 Classification
+![Banana UART Terminal Output](docs/images/banana_detected.jpg)
 
-![Banana Input](docs/images/banana_input.jpg)  
-![Banana UART Output](docs/images/banana_detected.jpg)
+#### Pomegranate 1 Test Image & Hardware Result
 
-#### Pomegranate 1 Classification
+![Pomegranate Input](docs/images/pomegranate_input.jpg)
 
-![Pomegranate Input](docs/images/pomegranate_input.jpg)  
-![Pomegranate UART Output](docs/images/pomegranate_detected.jpg)
+```text
+=== Fruit CNN int8 (calibrated scales) ===
+RELU1_OUT_SCALE = 13972 uS
+RELU2_OUT_SCALE = 70234 uS
+RELU_FC1_SCALE  = 858830 uS
+conv1_hw : 3 6 6 5 5 5 5 5 5 5 5 6 6 6 6 6 6 10 30 53 
+pool1_hw : 6 6 5 5 5 7 8 9 14 53 68 66 67 67 68 68 6 5 5 6 
+conv2_hw : 2 2 2 2 2 3 3 3 4 7 14 20 22 22 23 17 4 5 5 5 
+pool2_hw : 5 5 7 8 17 45 49 47 5 6 13 15 13 43 51 44 5 7 14 14 
+fc1_hw   : 0 27 9 17 0 0 0 0 0 14 14 0 6 0 15 10 0 0 13 0 0 0 0 27 30 0 15 0 16 0 21 16 
+fc2_hw   : -8686 -7359 57 -18798 153 
+HW pred : 4 
+HW cls  : Pomegranate 1
+```
+
+![Pomegranate UART Terminal Output](docs/images/pomegranate_detected.jpg)
 
 ---
 
-## Repository Structure
+## Repository Directory Tree
 
 ```
-RISCV-Multicore-FPGA-CNN/
-├── docs/                      # Technical documentation, PDF report, images, and charts
-│   ├── report.pdf             # Full BTP project report PDF
-│   ├── presentation.pptx      # BTP presentation slides
-│   └── images/                # Architecture diagrams, result logs, and performance charts
-├── firmware/                  # Bare-metal RISC-V C source code for worker cores
-│   ├── common/                # Shared CRT0 startup assembly, linker script, hex tool
-│   ├── cnn_conv_core/         # 2D Convolution int8 worker service
-│   ├── cnn_fc_core/           # Fully-Connected int8 worker service
-│   ├── fc_int8_core/          # Int8 FC unit service
-│   ├── fc_mnist_core/         # MNIST FC service with CSR cycle/instret counters
-│   └── fc_mlp_core/           # 2-layer MLP worker service
-├── host/                      # Standalone ARM Cortex-A9 driver applications
-│   ├── fruit_cnn_inference/   # End-to-end Fruit CNN inference host code and headers
-│   ├── mnist_single_layer/    # MNIST CNN host applications
-│   ├── mnist_fc_single_layer/ # MNIST FC service-mode host driver
-│   ├── mnist_mlp_two_layer/   # MNIST 2-layer MLP host controller
-│   └── int8_fc_test/          # Hardware verification testbench
-├── hardware/                  # Vivado platform scripts and architectural notes
-│   └── platform/              # Vitis platform recreation TCL scripts
-├── scripts/                   # Utility scripts for chart generation and PPT analysis
-├── .gitignore                 # Exclusion rules for build binaries and tool logs
+CNN_on_Multicore_RV32I/
+├── .gitignore                 # Exclusion rules for build artifacts
 ├── LICENSE                    # MIT License
-└── README.md                  # Main repository documentation
+├── README.md                  # System description and execution proof
+│
+├── docs/                      # Proof screenshots and architectural block diagrams
+│   └── images/                # Hardware execution logs and memory diagrams
+│
+├── firmware/                  # Bare-metal C worker firmware for RV32I cores
+│   ├── common/                # Shared CRT0 startup, linker script, and bin2carray utility
+│   ├── cnn_conv_core/         # 2D Convolution worker service
+│   ├── cnn_fc_core/           # Fully-Connected worker service
+│   ├── fc_int8_core/          # Int8 FC unit service
+│   ├── fc_mnist_core/         # MNIST FC service with CSR cycle/instret performance counters
+│   └── fc_mlp_core/           # 2-Layer MLP worker service
+│
+├── host/                      # ARM Cortex-A9 host orchestration applications
+│   ├── fruit_cnn_inference/   # Fruit CNN controller and model weight headers
+│   ├── mnist_single_layer/    # MNIST CNN host drivers
+│   ├── mnist_fc_single_layer/ # Continuous service-mode MNIST driver
+│   ├── mnist_mlp_two_layer/   # 2-Layer MLP host driver
+│   └── int8_fc_test/          # Hardware verification test bench
+│
+├── hardware/                  # Vivado platform files
+│   └── platform/              # Vitis platform recreation TCL script
+│
+└── scripts/                   # Performance and analysis scripts
+    ├── generate_charts.py
+    └── analyze_template.py
 ```
 
 ---
 
-## How to Build and Run
+## Build and Execution Guide
 
 ### Prerequisites
 
@@ -161,7 +153,7 @@ RISCV-Multicore-FPGA-CNN/
 - RISC-V GNU Toolchain (`riscv64-unknown-elf-gcc` with `-march=rv32i -mabi=ilp32`)
 - PYNQ-Z2 FPGA Board
 
-### 1. Compile RISC-V Worker Firmware
+### 1. Build Bare-Metal RISC-V Worker Firmware
 
 ```bash
 cd firmware
@@ -173,16 +165,15 @@ riscv64-unknown-elf-objcopy -O binary cnn_conv_core.elf cnn_conv_core.bin
 python common/bin2carray.py cnn_conv_core.bin cnn_conv_core.hex
 ```
 
-### 2. Build and Flash Host Application
+### 2. Build and Launch ARM Host Application
 
-1. Import `hardware/platform/platform.tcl` into Vitis to regenerate the PYNQ-Z2 hardware platform.
-2. Build `host/fruit_cnn_inference/main.c` targeted for `ps7_cortexa9_0`.
-3. Connect PYNQ-Z2 board via USB-UART and micro-USB JTAG.
-4. Open serial terminal at `115200` baud.
-5. Program FPGA bitstream and run the host application.
+1. Open Vitis 2022.1 and import the hardware platform generated from `hardware/platform/platform.tcl`.
+2. Build the target application located in `host/fruit_cnn_inference/main.c`.
+3. Connect the PYNQ-Z2 FPGA board via USB-UART and program the FPGA bitstream.
+4. Launch a serial terminal emulator at `115200` baud to view inference results.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is released under the [MIT License](LICENSE).
