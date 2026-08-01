@@ -113,7 +113,6 @@ HW cls  : Pomegranate 1
 ```
 CNN_on_Multicore_RV32I/
 ├── .gitignore                 # Exclusion rules for build artifacts
-├── LICENSE                    # MIT License
 ├── README.md                  # System description and execution proof
 │
 ├── docs/                      # Proof screenshots and architectural block diagrams
@@ -172,8 +171,3 @@ python common/bin2carray.py cnn_conv_core.bin cnn_conv_core.hex
 3. Connect the PYNQ-Z2 FPGA board via USB-UART and program the FPGA bitstream.
 4. Launch a serial terminal emulator at `115200` baud to view inference results.
 
----
-
-## License
-
-This project is released under the [MIT License](LICENSE).
