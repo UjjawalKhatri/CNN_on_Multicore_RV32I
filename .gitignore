@@ -1,0 +1,35 @@
+# Build Artifacts
+*.elf
+*.bin
+*.hex
+*.o
+*.a
+*.so
+*.out
+
+# Vivado Projects & Logs
+*.xpr
+*.runs/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.jou
+*.log
+vivado*.str
+
+# Vitis Workspace & Logs
+.metadata/
+.analytics
+.log/
+.project
+.cproject
+Debug/
+export/
+logs/
+RemoteSystemsTempFiles/
+
+# Python & System Cache
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
