@@ -1,0 +1,12 @@
+{
+  "name": "multicore_pipeline_4s",
+  "type": "HLS",
+  "configuration": {
+    "componentType": "HLS",
+    "configFiles": [
+      "multicore_pipeline_4s.cfg"
+    ],
+    "work_dir": "multicore_pipeline_4s"
+  },
+  "template": "empty_hls_component"
+}
